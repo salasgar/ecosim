@@ -1,5 +1,6 @@
 import { Rng } from "./rng";
 import { SpatialGrid } from "./spatialGrid";
+import type { WorldSnapshot } from "./protocol";
 
 // Phase 1: a single creature type that wanders, senses nearby food via the
 // spatial grid, eats, metabolizes, dies, and reproduces asexually with a
@@ -205,5 +206,58 @@ export class World {
 
     const mutated = this.creatureSpeedGene[parentIndex] + this.rng.gaussian(0, MUTATION_STD_DEV);
     this.creatureSpeedGene[childIndex] = Math.min(SPEED_GENE_MAX, Math.max(SPEED_GENE_MIN, mutated));
+  }
+
+  meanSpeedGene(): number {
+    if (this.creatureCount === 0) return 0;
+    let sum = 0;
+    for (let i = 0; i < this.creatureCount; i++) sum += this.creatureSpeedGene[i];
+    return sum / this.creatureCount;
+  }
+
+  toSnapshot(): WorldSnapshot {
+    return {
+      version: 1,
+      tick: this.tick,
+      worldWidth: this.worldWidth,
+      worldHeight: this.worldHeight,
+      rngState: this.rng.getState(),
+      creatureCount: this.creatureCount,
+      creaturePosX: Array.from(this.creaturePosX.subarray(0, this.creatureCount)),
+      creaturePosY: Array.from(this.creaturePosY.subarray(0, this.creatureCount)),
+      creatureHeadingX: Array.from(this.creatureHeadingX.subarray(0, this.creatureCount)),
+      creatureHeadingY: Array.from(this.creatureHeadingY.subarray(0, this.creatureCount)),
+      creatureSpeedGene: Array.from(this.creatureSpeedGene.subarray(0, this.creatureCount)),
+      creatureEnergy: Array.from(this.creatureEnergy.subarray(0, this.creatureCount)),
+      foodCount: this.foodCount,
+      foodPosX: Array.from(this.foodPosX.subarray(0, this.foodCount)),
+      foodPosY: Array.from(this.foodPosY.subarray(0, this.foodCount)),
+    };
+  }
+
+  loadSnapshot(snapshot: WorldSnapshot): void {
+    if (snapshot.creatureCount > this.creatureCapacity) {
+      throw new Error(
+        `Snapshot has ${snapshot.creatureCount} creatures, capacity is ${this.creatureCapacity}`,
+      );
+    }
+    if (snapshot.foodCount > this.foodCapacity) {
+      throw new Error(`Snapshot has ${snapshot.foodCount} food items, capacity is ${this.foodCapacity}`);
+    }
+
+    this.tick = snapshot.tick;
+    this.rng.setState(snapshot.rngState);
+
+    this.creatureCount = snapshot.creatureCount;
+    this.creaturePosX.set(snapshot.creaturePosX);
+    this.creaturePosY.set(snapshot.creaturePosY);
+    this.creatureHeadingX.set(snapshot.creatureHeadingX);
+    this.creatureHeadingY.set(snapshot.creatureHeadingY);
+    this.creatureSpeedGene.set(snapshot.creatureSpeedGene);
+    this.creatureEnergy.set(snapshot.creatureEnergy);
+
+    this.foodCount = snapshot.foodCount;
+    this.foodPosX.set(snapshot.foodPosX);
+    this.foodPosY.set(snapshot.foodPosY);
   }
 }

@@ -24,6 +24,17 @@ export class Rng {
     return Math.floor(this.next() * maxExclusive);
   }
 
+  // Exposed so a running simulation's exact future can be captured and
+  // restored across save/load, not just its visible state.
+  getState(): number {
+    return this.state;
+  }
+
+  setState(state: number): void {
+    this.state = state >>> 0;
+    this.cachedGaussian = null;
+  }
+
   // Box-Muller, one value cached per pair generated.
   gaussian(mean = 0, stdDev = 1): number {
     if (this.cachedGaussian !== null) {

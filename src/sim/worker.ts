@@ -1,11 +1,17 @@
 import { World } from "./world";
-import type { FromWorkerMessage, TickMessage, ToWorkerMessage } from "./protocol";
+import type {
+  FromWorkerMessage,
+  SaveMessage,
+  StatsMessage,
+  TickMessage,
+  ToWorkerMessage,
+} from "./protocol";
 
 // Typed narrowly instead of pulling in the "webworker" lib, which conflicts
 // with the "DOM" lib already used by the main thread in the same tsconfig.
 const ctx = self as unknown as {
   onmessage: ((event: MessageEvent<ToWorkerMessage>) => void) | null;
-  postMessage: (message: FromWorkerMessage, transfer: Transferable[]) => void;
+  postMessage: (message: FromWorkerMessage, transfer?: Transferable[]) => void;
 };
 
 const TICK_MS = 1000 / 30;
@@ -14,9 +20,10 @@ const DT = TICK_MS / 1000;
 let world: World | null = null;
 let paused = false;
 let ticksPerFrame = 1;
+let renderEnabled = true;
 let intervalId: number | undefined;
 
-function postSnapshot(w: World): void {
+function postTick(w: World): void {
   const creaturePosX = w.creaturePosX.slice(0, w.creatureCount);
   const creaturePosY = w.creaturePosY.slice(0, w.creatureCount);
   const creatureEnergy = w.creatureEnergy.slice(0, w.creatureCount);
@@ -44,11 +51,23 @@ function postSnapshot(w: World): void {
   ]);
 }
 
+function postStats(w: World): void {
+  const message: StatsMessage = {
+    type: "stats",
+    tick: w.tick,
+    creatureCount: w.creatureCount,
+    foodCount: w.foodCount,
+    meanSpeedGene: w.meanSpeedGene(),
+  };
+  ctx.postMessage(message);
+}
+
 function startLoop(): void {
   intervalId = setInterval(() => {
     if (!world || paused) return;
     for (let t = 0; t < ticksPerFrame; t++) world.step(DT);
-    postSnapshot(world);
+    postStats(world);
+    if (renderEnabled) postTick(world);
   }, TICK_MS);
 }
 
@@ -64,6 +83,26 @@ ctx.onmessage = (event) => {
       break;
     case "setSpeed":
       ticksPerFrame = Math.max(1, Math.floor(msg.ticksPerFrame));
+      break;
+    case "setRenderEnabled":
+      renderEnabled = msg.enabled;
+      if (renderEnabled && world) postTick(world);
+      break;
+    case "requestSave":
+      if (world) {
+        const message: SaveMessage = { type: "save", snapshot: world.toSnapshot() };
+        ctx.postMessage(message);
+      }
+      break;
+    case "load":
+      world = new World({
+        seed: 0,
+        worldWidth: msg.snapshot.worldWidth,
+        worldHeight: msg.snapshot.worldHeight,
+        initialCreatures: 0,
+        initialFood: 0,
+      });
+      world.loadSnapshot(msg.snapshot);
       break;
   }
 };

@@ -18,7 +18,31 @@ export interface SetSpeedMessage {
   ticksPerFrame: number;
 }
 
-export type ToWorkerMessage = InitMessage | SetPausedMessage | SetSpeedMessage;
+// When disabled, the worker stops building and transferring per-creature
+// position snapshots (the expensive part at thousands of creatures) while
+// still emitting cheap StatsMessages, so "max speed" buys a real speedup
+// instead of just hiding the canvas.
+export interface SetRenderEnabledMessage {
+  type: "setRenderEnabled";
+  enabled: boolean;
+}
+
+export interface RequestSaveMessage {
+  type: "requestSave";
+}
+
+export interface LoadMessage {
+  type: "load";
+  snapshot: WorldSnapshot;
+}
+
+export type ToWorkerMessage =
+  | InitMessage
+  | SetPausedMessage
+  | SetSpeedMessage
+  | SetRenderEnabledMessage
+  | RequestSaveMessage
+  | LoadMessage;
 
 export interface TickMessage {
   type: "tick";
@@ -32,4 +56,39 @@ export interface TickMessage {
   foodPosY: Float32Array;
 }
 
-export type FromWorkerMessage = TickMessage;
+// Cheap, array-free summary sent every tick regardless of render mode —
+// drives the HUD text and the population chart even in max-speed mode.
+export interface StatsMessage {
+  type: "stats";
+  tick: number;
+  creatureCount: number;
+  foodCount: number;
+  meanSpeedGene: number;
+}
+
+// A full, JSON-serializable copy of world state, precise enough (including
+// the RNG's internal state) to resume a run bit-for-bit identically.
+export interface WorldSnapshot {
+  version: 1;
+  tick: number;
+  worldWidth: number;
+  worldHeight: number;
+  rngState: number;
+  creatureCount: number;
+  creaturePosX: number[];
+  creaturePosY: number[];
+  creatureHeadingX: number[];
+  creatureHeadingY: number[];
+  creatureSpeedGene: number[];
+  creatureEnergy: number[];
+  foodCount: number;
+  foodPosX: number[];
+  foodPosY: number[];
+}
+
+export interface SaveMessage {
+  type: "save";
+  snapshot: WorldSnapshot;
+}
+
+export type FromWorkerMessage = TickMessage | StatsMessage | SaveMessage;
