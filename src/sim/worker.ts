@@ -1,5 +1,6 @@
 import { World } from "./world";
 import type {
+  ErrorMessage,
   FromWorkerMessage,
   SaveMessage,
   StatsMessage,
@@ -58,6 +59,8 @@ function postStats(w: World): void {
     creatureCount: w.creatureCount,
     foodCount: w.foodCount,
     meanSpeedGene: w.meanSpeedGene(),
+    meanKinTolerance: w.meanKinTolerance(),
+    totalPredations: w.totalPredations,
   };
   ctx.postMessage(message);
 }
@@ -95,14 +98,20 @@ ctx.onmessage = (event) => {
       }
       break;
     case "load":
-      world = new World({
-        seed: 0,
-        worldWidth: msg.snapshot.worldWidth,
-        worldHeight: msg.snapshot.worldHeight,
-        initialCreatures: 0,
-        initialFood: 0,
-      });
-      world.loadSnapshot(msg.snapshot);
+      try {
+        const candidate = new World({
+          seed: 0,
+          worldWidth: msg.snapshot.worldWidth,
+          worldHeight: msg.snapshot.worldHeight,
+          initialCreatures: 0,
+          initialFood: 0,
+        });
+        candidate.loadSnapshot(msg.snapshot);
+        world = candidate;
+      } catch (err) {
+        const message: ErrorMessage = { type: "error", message: err instanceof Error ? err.message : String(err) };
+        ctx.postMessage(message);
+      }
       break;
   }
 };

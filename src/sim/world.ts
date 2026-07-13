@@ -4,9 +4,19 @@ import type { WorldSnapshot } from "./protocol";
 
 // Phase 1: a single creature type that wanders, senses nearby food via the
 // spatial grid, eats, metabolizes, dies, and reproduces asexually with a
-// mutating "speed gene". This is the substrate the three experiments build
-// on top of (genome comparison, sexual selection, trade) — deliberately
-// minimal for now.
+// mutating "speed gene".
+//
+// Phase 3 (Experiment 1 — kinship & cannibalism): each creature also carries
+// a small vector of neutral "marker genes". Kinship isn't tracked via
+// pedigree (that would explode in memory over many generations); instead,
+// relatedness is approximated by genome similarity at these markers —
+// phenotype matching / "greenbeard" recognition. Each creature also has an
+// evolvable `kinTolerance`: how genetically different another creature must
+// be before it's treated as fair prey rather than kin. Hungry creatures
+// attack and eat non-kin within range. Since markers are inherited like any
+// other gene, similarity at these loci correlates with true relatedness at
+// every other locus too — including the kinTolerance gene itself — so kin
+// selection (Hamilton's rule, rB > C) has something to act on.
 
 const PERCEPTION_RADIUS = 80;
 const EAT_RADIUS = 6;
@@ -20,7 +30,18 @@ const REPRODUCE_THRESHOLD = 80;
 const MUTATION_STD_DEV = 0.05;
 const SPEED_GENE_MIN = 0.4;
 const SPEED_GENE_MAX = 1.8;
-const FOOD_SPAWN_RATE = 12; // food items/s while below capacity
+// Regrowth is modeled per empty slot (logistic-ish): the emptier the food
+// supply, the faster it regrows in absolute terms, which self-stabilizes
+// population instead of the flat-rate model collapsing under a boom.
+const FOOD_REGROWTH_PROBABILITY = 0.05; // fraction of empty capacity regrown/s
+
+const MARKER_GENE_COUNT = 6;
+const MAX_GENOME_DISTANCE = Math.sqrt(MARKER_GENE_COUNT);
+const GENOME_MUTATION_STD_DEV = 0.05;
+const KIN_TOLERANCE_MUTATION_STD_DEV = 0.1;
+const ATTACK_RADIUS = 8;
+const PREDATION_HUNGER_THRESHOLD = 35; // attempt predation when energy drops below this
+const PREDATION_EFFICIENCY = 0.55; // fraction of victim's energy gained (imperfect digestion)
 
 export interface WorldOptions {
   seed: number;
@@ -44,6 +65,8 @@ export class World {
   readonly creatureHeadingY: Float32Array;
   readonly creatureSpeedGene: Float32Array;
   readonly creatureEnergy: Float32Array;
+  readonly creatureGenomeMarkers: Float32Array; // flattened, MARKER_GENE_COUNT per creature
+  readonly creatureKinTolerance: Float32Array;
 
   readonly foodCapacity: number;
   foodCount = 0;
@@ -51,9 +74,11 @@ export class World {
   readonly foodPosY: Float32Array;
 
   tick = 0;
+  totalPredations = 0;
 
   private readonly rng: Rng;
   private readonly foodGrid: SpatialGrid;
+  private readonly creatureGrid: SpatialGrid;
 
   constructor(options: WorldOptions) {
     this.worldWidth = options.worldWidth;
@@ -67,12 +92,15 @@ export class World {
     this.creatureHeadingY = new Float32Array(this.creatureCapacity);
     this.creatureSpeedGene = new Float32Array(this.creatureCapacity);
     this.creatureEnergy = new Float32Array(this.creatureCapacity);
+    this.creatureGenomeMarkers = new Float32Array(this.creatureCapacity * MARKER_GENE_COUNT);
+    this.creatureKinTolerance = new Float32Array(this.creatureCapacity);
 
     this.foodPosX = new Float32Array(this.foodCapacity);
     this.foodPosY = new Float32Array(this.foodCapacity);
 
     this.rng = new Rng(options.seed);
     this.foodGrid = new SpatialGrid(this.worldWidth, this.worldHeight, PERCEPTION_RADIUS);
+    this.creatureGrid = new SpatialGrid(this.worldWidth, this.worldHeight, ATTACK_RADIUS);
 
     const initialCreatures = options.initialCreatures ?? 200;
     for (let i = 0; i < initialCreatures; i++) this.spawnCreature();
@@ -145,8 +173,59 @@ export class World {
       }
     }
 
+    this.resolvePredation();
     this.spawnFoodOverTime(dt);
     this.tick++;
+  }
+
+  // Hungry creatures attack and eat the nearest non-kin creature in range.
+  // Runs as a pass separate from the main loop for clarity; it only sees
+  // survivors of that loop, and any creature it kills is deferred (via the
+  // usual swap-pop) to be re-evaluated next tick if a replacement lands in
+  // its slot.
+  private resolvePredation(): void {
+    this.creatureGrid.clear();
+    for (let i = 0; i < this.creatureCount; i++) {
+      this.creatureGrid.insert(i, this.creaturePosX[i], this.creaturePosY[i]);
+    }
+
+    for (let i = this.creatureCount - 1; i >= 0; i--) {
+      if (this.creatureEnergy[i] >= PREDATION_HUNGER_THRESHOLD) continue;
+
+      const cx = this.creaturePosX[i];
+      const cy = this.creaturePosY[i];
+      const kinTolerance = this.creatureKinTolerance[i];
+
+      let victim = -1;
+      let victimDistSq = ATTACK_RADIUS * ATTACK_RADIUS;
+      this.creatureGrid.forEachNear(cx, cy, ATTACK_RADIUS, (other) => {
+        if (other === i || other >= this.creatureCount) return;
+        const dx = this.creaturePosX[other] - cx;
+        const dy = this.creaturePosY[other] - cy;
+        const distSq = dx * dx + dy * dy;
+        if (distSq <= victimDistSq && this.genomeDistance(i, other) > kinTolerance) {
+          victimDistSq = distSq;
+          victim = other;
+        }
+      });
+
+      if (victim >= 0 && victim < this.creatureCount) {
+        this.creatureEnergy[i] += PREDATION_EFFICIENCY * this.creatureEnergy[victim];
+        this.removeCreature(victim);
+        this.totalPredations++;
+      }
+    }
+  }
+
+  private genomeDistance(a: number, b: number): number {
+    let sumSq = 0;
+    const baseA = a * MARKER_GENE_COUNT;
+    const baseB = b * MARKER_GENE_COUNT;
+    for (let g = 0; g < MARKER_GENE_COUNT; g++) {
+      const diff = this.creatureGenomeMarkers[baseA + g] - this.creatureGenomeMarkers[baseB + g];
+      sumSq += diff * diff;
+    }
+    return Math.sqrt(sumSq);
   }
 
   private spawnCreature(): void {
@@ -158,6 +237,9 @@ export class World {
     this.creatureHeadingY[i] = Math.sin(angle);
     this.creatureSpeedGene[i] = this.rng.range(0.8, 1.2);
     this.creatureEnergy[i] = INITIAL_ENERGY;
+    const base = i * MARKER_GENE_COUNT;
+    for (let g = 0; g < MARKER_GENE_COUNT; g++) this.creatureGenomeMarkers[base + g] = this.rng.next();
+    this.creatureKinTolerance[i] = this.rng.range(0, MAX_GENOME_DISTANCE);
   }
 
   private spawnFood(): void {
@@ -167,8 +249,9 @@ export class World {
   }
 
   private spawnFoodOverTime(dt: number): void {
-    if (this.foodCount >= this.foodCapacity) return;
-    const expected = FOOD_SPAWN_RATE * dt;
+    const emptySlots = this.foodCapacity - this.foodCount;
+    if (emptySlots <= 0) return;
+    const expected = FOOD_REGROWTH_PROBABILITY * emptySlots * dt;
     let spawns = Math.floor(expected);
     if (this.rng.next() < expected - spawns) spawns++;
     for (let s = 0; s < spawns && this.foodCount < this.foodCapacity; s++) this.spawnFood();
@@ -189,6 +272,12 @@ export class World {
     this.creatureHeadingY[index] = this.creatureHeadingY[last];
     this.creatureSpeedGene[index] = this.creatureSpeedGene[last];
     this.creatureEnergy[index] = this.creatureEnergy[last];
+    this.creatureKinTolerance[index] = this.creatureKinTolerance[last];
+    const indexBase = index * MARKER_GENE_COUNT;
+    const lastBase = last * MARKER_GENE_COUNT;
+    for (let g = 0; g < MARKER_GENE_COUNT; g++) {
+      this.creatureGenomeMarkers[indexBase + g] = this.creatureGenomeMarkers[lastBase + g];
+    }
     this.creatureCount--;
   }
 
@@ -204,8 +293,19 @@ export class World {
     this.creatureHeadingY[childIndex] = Math.sin(angle);
     this.creatureEnergy[childIndex] = childEnergy;
 
-    const mutated = this.creatureSpeedGene[parentIndex] + this.rng.gaussian(0, MUTATION_STD_DEV);
-    this.creatureSpeedGene[childIndex] = Math.min(SPEED_GENE_MAX, Math.max(SPEED_GENE_MIN, mutated));
+    const mutatedSpeed = this.creatureSpeedGene[parentIndex] + this.rng.gaussian(0, MUTATION_STD_DEV);
+    this.creatureSpeedGene[childIndex] = Math.min(SPEED_GENE_MAX, Math.max(SPEED_GENE_MIN, mutatedSpeed));
+
+    const parentBase = parentIndex * MARKER_GENE_COUNT;
+    const childBase = childIndex * MARKER_GENE_COUNT;
+    for (let g = 0; g < MARKER_GENE_COUNT; g++) {
+      const mutated = this.creatureGenomeMarkers[parentBase + g] + this.rng.gaussian(0, GENOME_MUTATION_STD_DEV);
+      this.creatureGenomeMarkers[childBase + g] = Math.min(1, Math.max(0, mutated));
+    }
+
+    const mutatedTolerance =
+      this.creatureKinTolerance[parentIndex] + this.rng.gaussian(0, KIN_TOLERANCE_MUTATION_STD_DEV);
+    this.creatureKinTolerance[childIndex] = Math.min(MAX_GENOME_DISTANCE, Math.max(0, mutatedTolerance));
   }
 
   meanSpeedGene(): number {
@@ -215,9 +315,16 @@ export class World {
     return sum / this.creatureCount;
   }
 
+  meanKinTolerance(): number {
+    if (this.creatureCount === 0) return 0;
+    let sum = 0;
+    for (let i = 0; i < this.creatureCount; i++) sum += this.creatureKinTolerance[i];
+    return sum / this.creatureCount;
+  }
+
   toSnapshot(): WorldSnapshot {
     return {
-      version: 1,
+      version: 2,
       tick: this.tick,
       worldWidth: this.worldWidth,
       worldHeight: this.worldHeight,
@@ -229,6 +336,11 @@ export class World {
       creatureHeadingY: Array.from(this.creatureHeadingY.subarray(0, this.creatureCount)),
       creatureSpeedGene: Array.from(this.creatureSpeedGene.subarray(0, this.creatureCount)),
       creatureEnergy: Array.from(this.creatureEnergy.subarray(0, this.creatureCount)),
+      creatureGenomeMarkers: Array.from(
+        this.creatureGenomeMarkers.subarray(0, this.creatureCount * MARKER_GENE_COUNT),
+      ),
+      creatureKinTolerance: Array.from(this.creatureKinTolerance.subarray(0, this.creatureCount)),
+      totalPredations: this.totalPredations,
       foodCount: this.foodCount,
       foodPosX: Array.from(this.foodPosX.subarray(0, this.foodCount)),
       foodPosY: Array.from(this.foodPosY.subarray(0, this.foodCount)),
@@ -236,6 +348,9 @@ export class World {
   }
 
   loadSnapshot(snapshot: WorldSnapshot): void {
+    if (snapshot.version !== 2) {
+      throw new Error(`Versión de guardado incompatible: se esperaba 2, el archivo tiene ${snapshot.version}`);
+    }
     if (snapshot.creatureCount > this.creatureCapacity) {
       throw new Error(
         `Snapshot has ${snapshot.creatureCount} creatures, capacity is ${this.creatureCapacity}`,
@@ -255,6 +370,9 @@ export class World {
     this.creatureHeadingY.set(snapshot.creatureHeadingY);
     this.creatureSpeedGene.set(snapshot.creatureSpeedGene);
     this.creatureEnergy.set(snapshot.creatureEnergy);
+    this.creatureGenomeMarkers.set(snapshot.creatureGenomeMarkers);
+    this.creatureKinTolerance.set(snapshot.creatureKinTolerance);
+    this.totalPredations = snapshot.totalPredations;
 
     this.foodCount = snapshot.foodCount;
     this.foodPosX.set(snapshot.foodPosX);

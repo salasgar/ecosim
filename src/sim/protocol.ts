@@ -64,12 +64,14 @@ export interface StatsMessage {
   creatureCount: number;
   foodCount: number;
   meanSpeedGene: number;
+  meanKinTolerance: number;
+  totalPredations: number;
 }
 
 // A full, JSON-serializable copy of world state, precise enough (including
 // the RNG's internal state) to resume a run bit-for-bit identically.
 export interface WorldSnapshot {
-  version: 1;
+  version: 2;
   tick: number;
   worldWidth: number;
   worldHeight: number;
@@ -81,6 +83,9 @@ export interface WorldSnapshot {
   creatureHeadingY: number[];
   creatureSpeedGene: number[];
   creatureEnergy: number[];
+  creatureGenomeMarkers: number[];
+  creatureKinTolerance: number[];
+  totalPredations: number;
   foodCount: number;
   foodPosX: number[];
   foodPosY: number[];
@@ -91,4 +96,9 @@ export interface SaveMessage {
   snapshot: WorldSnapshot;
 }
 
-export type FromWorkerMessage = TickMessage | StatsMessage | SaveMessage;
+export interface ErrorMessage {
+  type: "error";
+  message: string;
+}
+
+export type FromWorkerMessage = TickMessage | StatsMessage | SaveMessage | ErrorMessage;

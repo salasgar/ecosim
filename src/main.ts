@@ -114,11 +114,14 @@ async function bootstrap(): Promise<void> {
         renderer.update(message);
         break;
       case "stats":
-        stats.textContent = `tick ${message.tick} · criaturas ${message.creatureCount} · comida ${message.foodCount} · vel. media ${message.meanSpeedGene.toFixed(2)}`;
+        stats.textContent = `tick ${message.tick} · criaturas ${message.creatureCount} · comida ${message.foodCount} · vel. media ${message.meanSpeedGene.toFixed(2)} · umbral parentesco ${message.meanKinTolerance.toFixed(2)} · depredaciones ${message.totalPredations}`;
         chart.push(message);
         break;
       case "save":
         downloadSnapshot(message.snapshot);
+        break;
+      case "error":
+        alert(message.message);
         break;
     }
   };
