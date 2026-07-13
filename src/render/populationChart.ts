@@ -1,15 +1,12 @@
 import uPlot from "uplot";
 import type { StatsMessage } from "../sim/protocol";
+import { DecimatingSeriesBuffer } from "./decimatingBuffer";
 
-const MAX_POINTS = 2000;
+const MAX_POINTS = 8000;
 
 export class PopulationChart {
   private readonly plot: uPlot;
-  private ticks: number[] = [];
-  private creatures: number[] = [];
-  private food: number[] = [];
-  private meanSpeed: number[] = [];
-  private meanKinTolerance: number[] = [];
+  private readonly buffer = new DecimatingSeriesBuffer(MAX_POINTS, 5);
 
   constructor(host: HTMLElement) {
     const options: uPlot.Options = {
@@ -39,20 +36,7 @@ export class PopulationChart {
   }
 
   push(stats: StatsMessage): void {
-    this.ticks.push(stats.tick);
-    this.creatures.push(stats.creatureCount);
-    this.food.push(stats.foodCount);
-    this.meanSpeed.push(stats.meanSpeedGene);
-    this.meanKinTolerance.push(stats.meanKinTolerance);
-    if (this.ticks.length > MAX_POINTS) this.decimate();
-    this.plot.setData([this.ticks, this.creatures, this.food, this.meanSpeed, this.meanKinTolerance]);
-  }
-
-  private decimate(): void {
-    this.ticks = this.ticks.filter((_, i) => i % 2 === 0);
-    this.creatures = this.creatures.filter((_, i) => i % 2 === 0);
-    this.food = this.food.filter((_, i) => i % 2 === 0);
-    this.meanSpeed = this.meanSpeed.filter((_, i) => i % 2 === 0);
-    this.meanKinTolerance = this.meanKinTolerance.filter((_, i) => i % 2 === 0);
+    this.buffer.push([stats.tick, stats.creatureCount, stats.foodCount, stats.meanSpeedGene, stats.meanKinTolerance]);
+    this.plot.setData(this.buffer.data() as [number[], number[], number[], number[], number[]]);
   }
 }

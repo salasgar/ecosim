@@ -1,7 +1,8 @@
 import uPlot from "uplot";
 import type { StatsMessage } from "../sim/protocol";
+import { DecimatingSeriesBuffer } from "./decimatingBuffer";
 
-const MAX_POINTS = 2000;
+const MAX_POINTS = 8000;
 
 // Tracks Experiment 2's core question: does mate preference for
 // reserveGene vs. speedGene track which trait the climate currently
@@ -10,10 +11,7 @@ const MAX_POINTS = 2000;
 // enough for a diagnostic chart.
 export class TraitChart {
   private readonly plot: uPlot;
-  private ticks: number[] = [];
-  private reserveGene: number[] = [];
-  private prefSpeed: number[] = [];
-  private prefReserve: number[] = [];
+  private readonly buffer = new DecimatingSeriesBuffer(MAX_POINTS, 4);
 
   constructor(host: HTMLElement) {
     const options: uPlot.Options = {
@@ -37,18 +35,7 @@ export class TraitChart {
   }
 
   push(stats: StatsMessage): void {
-    this.ticks.push(stats.tick);
-    this.reserveGene.push(stats.meanReserveGene);
-    this.prefSpeed.push(stats.meanPrefSpeed);
-    this.prefReserve.push(stats.meanPrefReserve);
-    if (this.ticks.length > MAX_POINTS) this.decimate();
-    this.plot.setData([this.ticks, this.reserveGene, this.prefSpeed, this.prefReserve]);
-  }
-
-  private decimate(): void {
-    this.ticks = this.ticks.filter((_, i) => i % 2 === 0);
-    this.reserveGene = this.reserveGene.filter((_, i) => i % 2 === 0);
-    this.prefSpeed = this.prefSpeed.filter((_, i) => i % 2 === 0);
-    this.prefReserve = this.prefReserve.filter((_, i) => i % 2 === 0);
+    this.buffer.push([stats.tick, stats.meanReserveGene, stats.meanPrefSpeed, stats.meanPrefReserve]);
+    this.plot.setData(this.buffer.data() as [number[], number[], number[], number[]]);
   }
 }
