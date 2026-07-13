@@ -1,9 +1,12 @@
 import uPlot from "uplot";
 import type { StatsMessage } from "../sim/protocol";
 import { DecimatingSeriesBuffer } from "./decimatingBuffer";
-import { seriesColor, seriesLabel, type PlottableKey } from "./seriesCatalog";
+import { SERIES_CATALOG, seriesColor, seriesLabel, type PlottableKey } from "./seriesCatalog";
 
-const MAX_POINTS = 8000;
+// Shared with the charts manager's history buffer, which is sized to match
+// so a freshly configured chart can be backfilled at full available
+// resolution instead of starting blank at the current tick.
+export const MAX_POINTS = 8000;
 const CHART_HEIGHT = 140;
 
 export type AxisSide = "left" | "right";
@@ -28,10 +31,22 @@ export class ConfigurableChart {
     this.host = host;
   }
 
-  setSeries(series: ChartSeriesConfig[]): void {
+  // `historyColumns`, when given, is the charts manager's shared
+  // tick-indexed history (column 0 is tick, column i+1 is
+  // SERIES_CATALOG[i]) — passing it backfills this chart from tick 0
+  // instead of leaving it blank until the next live stats push.
+  setSeries(series: ChartSeriesConfig[], historyColumns?: readonly number[][]): void {
     this.series = series;
     this.buffer = new DecimatingSeriesBuffer(MAX_POINTS, series.length + 1);
     this.rebuildPlot();
+    if (this.series.length === 0 || !historyColumns || historyColumns.length === 0) return;
+
+    const columnIndexes = this.series.map((s) => SERIES_CATALOG.findIndex((d) => d.key === s.key) + 1);
+    const tickColumn = historyColumns[0];
+    for (let i = 0; i < tickColumn.length; i++) {
+      this.buffer.push([tickColumn[i], ...columnIndexes.map((col) => historyColumns[col][i])]);
+    }
+    this.plot?.setData(this.buffer.data() as unknown as uPlot.AlignedData);
   }
 
   push(stats: StatsMessage): void {

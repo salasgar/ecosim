@@ -1,5 +1,6 @@
 import type { StatsMessage } from "../sim/protocol";
-import { ConfigurableChart, type AxisSide, type ChartSeriesConfig } from "./configurableChart";
+import { ConfigurableChart, MAX_POINTS, type AxisSide, type ChartSeriesConfig } from "./configurableChart";
+import { DecimatingSeriesBuffer } from "./decimatingBuffer";
 import { SERIES_CATALOG } from "./seriesCatalog";
 
 interface ChartConfig {
@@ -65,6 +66,12 @@ export function createChartsManager(appHost: HTMLElement): ChartsManager {
   let nextId = 1;
   const entries = new Map<string, ChartEntry>();
 
+  // Tracks every plottable field since tick 0, independent of which charts
+  // currently exist or what they're configured to show — lets a chart
+  // created mid-run be backfilled from the start instead of showing only
+  // data pushed after it was created.
+  const history = new DecimatingSeriesBuffer(MAX_POINTS, SERIES_CATALOG.length + 1);
+
   const chartsArea = document.createElement("div");
   chartsArea.className = "charts-area";
   appHost.appendChild(chartsArea);
@@ -101,7 +108,7 @@ export function createChartsManager(appHost: HTMLElement): ChartsManager {
     chartsArea.appendChild(card);
 
     const instance = new ConfigurableChart(plotHost);
-    instance.setSeries(config.series);
+    instance.setSeries(config.series, history.data());
 
     const resizeObserver = new ResizeObserver((observedEntries) => {
       for (const observed of observedEntries) {
@@ -202,7 +209,7 @@ export function createChartsManager(appHost: HTMLElement): ChartsManager {
           config.series.splice(idx, 1);
         }
         axisSelect.disabled = !checkbox.checked;
-        entries.get(config.id)?.instance.setSeries([...config.series]);
+        entries.get(config.id)?.instance.setSeries([...config.series], history.data());
       };
 
       checkbox.addEventListener("change", syncSeries);
@@ -228,6 +235,7 @@ export function createChartsManager(appHost: HTMLElement): ChartsManager {
 
   return {
     push(stats: StatsMessage): void {
+      history.push([stats.tick, ...SERIES_CATALOG.map((d) => stats[d.key] as number)]);
       for (const entry of entries.values()) entry.instance.push(stats);
     },
     togglePanel(): void {
