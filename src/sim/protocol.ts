@@ -1,11 +1,20 @@
 // Message contract between the main thread and the simulation worker.
 // Kept in one place so both sides stay in sync.
 
+import type { SimParams } from "./params";
+
 export interface InitMessage {
   type: "init";
   seed: number;
   worldWidth: number;
   worldHeight: number;
+}
+
+// Sent whenever the params panel changes a slider — a partial patch, merged
+// into the live World so a run's parameters can be tuned without restarting.
+export interface SetParamsMessage {
+  type: "setParams";
+  params: Partial<SimParams>;
 }
 
 export interface SetPausedMessage {
@@ -42,7 +51,8 @@ export type ToWorkerMessage =
   | SetSpeedMessage
   | SetRenderEnabledMessage
   | RequestSaveMessage
-  | LoadMessage;
+  | LoadMessage
+  | SetParamsMessage;
 
 export interface TickMessage {
   type: "tick";
@@ -85,7 +95,7 @@ export interface StatsMessage {
 // A full, JSON-serializable copy of world state, precise enough (including
 // the RNG's internal state) to resume a run bit-for-bit identically.
 export interface WorldSnapshot {
-  version: 4;
+  version: 5;
   tick: number;
   worldWidth: number;
   worldHeight: number;
@@ -119,6 +129,7 @@ export interface WorldSnapshot {
   foodBCount: number;
   foodBPosX: number[];
   foodBPosY: number[];
+  params: SimParams;
 }
 
 export interface SaveMessage {

@@ -119,6 +119,9 @@ ctx.onmessage = (event) => {
         ctx.postMessage(message);
       }
       break;
+    case "setParams":
+      if (world) world.setParams(msg.params);
+      break;
     case "load":
       try {
         const candidate = new World({

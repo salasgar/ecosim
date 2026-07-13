@@ -72,3 +72,80 @@ body {
   transform: translateX(-50%);
 }
 
+.params-panel {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 2;
+  width: 320px;
+  overflow-y: auto;
+  padding: 12px;
+  background: rgba(10, 14, 20, 0.92);
+  border: 1px solid #2e303a;
+  border-radius: 6px;
+  backdrop-filter: blur(4px);
+}
+
+.params-panel.hidden {
+  display: none;
+}
+
+.params-panel-header {
+  font-weight: bold;
+  margin-bottom: 8px;
+}
+
+.params-panel button {
+  font: inherit;
+  color: inherit;
+  background: #1f2028;
+  border: 1px solid #2e303a;
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+.params-panel button:hover {
+  border-color: #c084fc;
+}
+
+.params-panel fieldset {
+  border: 1px solid #2e303a;
+  border-radius: 4px;
+  margin-bottom: 10px;
+  padding: 6px 10px 10px;
+}
+
+.params-panel legend {
+  padding: 0 4px;
+  color: #c084fc;
+  font-size: 12px;
+}
+
+.param-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 6px 0;
+}
+
+.param-label {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.param-row input[type="range"] {
+  width: 100%;
+}
+
+.param-value {
+  min-width: 3.5em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+

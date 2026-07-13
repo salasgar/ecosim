@@ -5,8 +5,14 @@ import { PopulationChart } from "./render/populationChart";
 import { TraitChart } from "./render/traitChart";
 import { TradeChart } from "./render/tradeChart";
 import type { FromWorkerMessage, ToWorkerMessage, WorldSnapshot } from "./sim/protocol";
+import { DEFAULT_PARAMS, PARAM_DESCRIPTORS, type SimParams } from "./sim/params";
 
 const MAX_SPEED_TICKS_PER_FRAME = 20;
+
+function decimalsForStep(step: number): number {
+  const dot = step.toString().indexOf(".");
+  return dot === -1 ? 0 : step.toString().length - dot - 1;
+}
 
 function downloadSnapshot(snapshot: WorldSnapshot): void {
   const blob = new Blob([JSON.stringify(snapshot)], { type: "application/json" });
@@ -44,6 +50,10 @@ async function bootstrap(): Promise<void> {
   loadButton.textContent = "Cargar";
   hud.appendChild(loadButton);
 
+  const paramsButton = document.createElement("button");
+  paramsButton.textContent = "Parámetros";
+  hud.appendChild(paramsButton);
+
   const loadInput = document.createElement("input");
   loadInput.type = "file";
   loadInput.accept = "application/json";
@@ -75,6 +85,87 @@ async function bootstrap(): Promise<void> {
   const tradeChart = new TradeChart(tradeChartHost);
 
   const worker = new Worker(new URL("./sim/worker.ts", import.meta.url), { type: "module" });
+
+  const currentParams: SimParams = { ...DEFAULT_PARAMS };
+  const paramInputs = new Map<keyof SimParams, HTMLInputElement>();
+  const paramValueSpans = new Map<keyof SimParams, HTMLSpanElement>();
+
+  const paramsPanel = document.createElement("div");
+  paramsPanel.className = "params-panel hidden";
+  appHost.appendChild(paramsPanel);
+
+  const paramsHeader = document.createElement("div");
+  paramsHeader.className = "params-panel-header";
+  paramsHeader.textContent = "Parámetros de la simulación";
+  paramsPanel.appendChild(paramsHeader);
+
+  const resetParamsButton = document.createElement("button");
+  resetParamsButton.textContent = "Restablecer valores por defecto";
+  paramsPanel.appendChild(resetParamsButton);
+
+  let currentGroup = "";
+  let groupFieldset: HTMLFieldSetElement | null = null;
+  for (const descriptor of PARAM_DESCRIPTORS) {
+    if (descriptor.group !== currentGroup) {
+      currentGroup = descriptor.group;
+      groupFieldset = document.createElement("fieldset");
+      const legend = document.createElement("legend");
+      legend.textContent = currentGroup;
+      groupFieldset.appendChild(legend);
+      paramsPanel.appendChild(groupFieldset);
+    }
+
+    const row = document.createElement("label");
+    row.className = "param-row";
+
+    const labelText = document.createElement("span");
+    labelText.className = "param-label";
+    labelText.textContent = descriptor.label;
+
+    const input = document.createElement("input");
+    input.type = "range";
+    input.min = String(descriptor.min);
+    input.max = String(descriptor.max);
+    input.step = String(descriptor.step);
+    input.value = String(currentParams[descriptor.key]);
+    paramInputs.set(descriptor.key, input);
+
+    const valueSpan = document.createElement("span");
+    valueSpan.className = "param-value";
+    valueSpan.textContent = currentParams[descriptor.key].toFixed(decimalsForStep(descriptor.step));
+    paramValueSpans.set(descriptor.key, valueSpan);
+
+    input.addEventListener("input", () => {
+      const value = Number(input.value);
+      currentParams[descriptor.key] = value;
+      valueSpan.textContent = value.toFixed(decimalsForStep(descriptor.step));
+      const patch = { [descriptor.key]: value } as Partial<SimParams>;
+      const message: ToWorkerMessage = { type: "setParams", params: patch };
+      worker.postMessage(message);
+    });
+
+    row.appendChild(labelText);
+    row.appendChild(input);
+    row.appendChild(valueSpan);
+    (groupFieldset as HTMLFieldSetElement).appendChild(row);
+  }
+
+  resetParamsButton.addEventListener("click", () => {
+    Object.assign(currentParams, DEFAULT_PARAMS);
+    for (const descriptor of PARAM_DESCRIPTORS) {
+      const input = paramInputs.get(descriptor.key);
+      const valueSpan = paramValueSpans.get(descriptor.key);
+      const value = DEFAULT_PARAMS[descriptor.key];
+      if (input) input.value = String(value);
+      if (valueSpan) valueSpan.textContent = value.toFixed(decimalsForStep(descriptor.step));
+    }
+    const message: ToWorkerMessage = { type: "setParams", params: { ...DEFAULT_PARAMS } };
+    worker.postMessage(message);
+  });
+
+  paramsButton.addEventListener("click", () => {
+    paramsPanel.classList.toggle("hidden");
+  });
 
   let paused = false;
   pauseButton.addEventListener("click", () => {
