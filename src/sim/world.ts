@@ -15,7 +15,7 @@ import type { WorldSnapshot } from "./protocol";
 // be before it's treated as fair prey rather than kin.
 //
 // Phase 4 (Experiment 2 — mate choice & sexual selection): reproduction is
-// now biparental. Every creature has two functional traits — `speedGene`
+// biparental. Every creature has two functional traits — `speedGene`
 // (agility) and `reserveGene` (metabolic efficiency, i.e. fat reserves) —
 // plus a preference genome (`prefSpeed`, `prefReserve`, `mateTolerance`)
 // describing what it looks for in a mate. Two ready creatures reproduce only
@@ -24,6 +24,18 @@ import type { WorldSnapshot } from "./protocol";
 // independently from either parent (Mendelian-style assortment) plus
 // mutation. A slow climate cycle alternates food scarcity and abundance to
 // test whether mate preference tracks which trait actually pays off.
+//
+// Phase 6 (Experiment 3 — trade & cooperation): besides the generic energy
+// food, creatures need two nutrients, A and B. Extraction ability is
+// constrained to a Pareto frontier (habA^2 + habB^2 == 1, via a single
+// `habAngle` gene) so no one can be great at gathering both — specialists
+// emerge under selection. A creature with a surplus of one nutrient and a
+// deficit of the other can trade chunks with a nearby creature with the
+// complementary profile; both sides only ever gain (v1 assumes honest,
+// atomic exchange — no defection is modeled yet). Trade partner choice is
+// biased toward genetic kin via an evolvable `kinTradeBias`, reusing
+// Experiment 1's genome-similarity machinery: kin cooperation is the
+// easiest form of cooperation to evolve, so it's the natural bootstrap.
 
 const PERCEPTION_RADIUS = 80;
 const EAT_RADIUS = 6;
@@ -65,6 +77,18 @@ const MATE_SEEK_RADIUS = 40;
 const SEXUAL_REPRODUCE_COST_PER_PARENT = 30;
 const CHILD_INITIAL_ENERGY = SEXUAL_REPRODUCE_COST_PER_PARENT * 2;
 
+const HAB_ANGLE_MUTATION_STD_DEV = 0.15; // radians
+const NUTRIENT_GAIN_MAX = 30; // nutrient gained per patch at hab == 1
+const NUTRIENT_RESERVE_CAP = 150;
+const NUTRIENT_TARGET_RESERVE = 50; // surplus/deficit are measured against this
+const NUTRIENT_MIN_FOR_REPRODUCTION = 20;
+const NUTRIENT_REPRODUCE_COST = 15; // each parent pays this from both reserveA and reserveB
+const NUTRIENT_CHILD_INITIAL_RESERVE = 20;
+const NUTRIENT_INITIAL_RESERVE = 25; // starting individuals have no parents to inherit from
+const TRADE_RADIUS = 30;
+const TRADE_CHUNK = 10;
+const KIN_TRADE_BIAS_MUTATION_STD_DEV = 0.1;
+
 export interface WorldOptions {
   seed: number;
   worldWidth: number;
@@ -73,6 +97,8 @@ export interface WorldOptions {
   foodCapacity?: number;
   initialCreatures?: number;
   initialFood?: number;
+  nutrientCapacity?: number;
+  initialNutrient?: number;
 }
 
 export class World {
@@ -93,27 +119,45 @@ export class World {
   readonly creaturePrefSpeed: Float32Array;
   readonly creaturePrefReserve: Float32Array;
   readonly creatureMateTolerance: Float32Array;
+  readonly creatureHabAngle: Float32Array; // habA = cos(angle), habB = sin(angle)
+  readonly creatureReserveA: Float32Array;
+  readonly creatureReserveB: Float32Array;
+  readonly creatureKinTradeBias: Float32Array;
 
   readonly foodCapacity: number;
   foodCount = 0;
   readonly foodPosX: Float32Array;
   readonly foodPosY: Float32Array;
 
+  readonly nutrientCapacity: number;
+  foodACount = 0;
+  readonly foodAPosX: Float32Array;
+  readonly foodAPosY: Float32Array;
+  foodBCount = 0;
+  readonly foodBPosX: Float32Array;
+  readonly foodBPosY: Float32Array;
+
   tick = 0;
   totalPredations = 0;
   totalMatings = 0;
+  totalTrades = 0;
 
   private readonly rng: Rng;
   private readonly foodGrid: SpatialGrid;
+  private readonly foodAGrid: SpatialGrid;
+  private readonly foodBGrid: SpatialGrid;
   private readonly creatureGrid: SpatialGrid;
   private readonly matingGrid: SpatialGrid;
+  private readonly tradeGrid: SpatialGrid;
   private hasMatedThisTick: Uint8Array;
+  private hasTradedThisTick: Uint8Array;
 
   constructor(options: WorldOptions) {
     this.worldWidth = options.worldWidth;
     this.worldHeight = options.worldHeight;
     this.creatureCapacity = options.creatureCapacity ?? 4000;
     this.foodCapacity = options.foodCapacity ?? 2000;
+    this.nutrientCapacity = options.nutrientCapacity ?? 1500;
 
     this.creaturePosX = new Float32Array(this.creatureCapacity);
     this.creaturePosY = new Float32Array(this.creatureCapacity);
@@ -127,27 +171,51 @@ export class World {
     this.creaturePrefSpeed = new Float32Array(this.creatureCapacity);
     this.creaturePrefReserve = new Float32Array(this.creatureCapacity);
     this.creatureMateTolerance = new Float32Array(this.creatureCapacity);
+    this.creatureHabAngle = new Float32Array(this.creatureCapacity);
+    this.creatureReserveA = new Float32Array(this.creatureCapacity);
+    this.creatureReserveB = new Float32Array(this.creatureCapacity);
+    this.creatureKinTradeBias = new Float32Array(this.creatureCapacity);
     this.hasMatedThisTick = new Uint8Array(this.creatureCapacity);
+    this.hasTradedThisTick = new Uint8Array(this.creatureCapacity);
 
     this.foodPosX = new Float32Array(this.foodCapacity);
     this.foodPosY = new Float32Array(this.foodCapacity);
+    this.foodAPosX = new Float32Array(this.nutrientCapacity);
+    this.foodAPosY = new Float32Array(this.nutrientCapacity);
+    this.foodBPosX = new Float32Array(this.nutrientCapacity);
+    this.foodBPosY = new Float32Array(this.nutrientCapacity);
 
     this.rng = new Rng(options.seed);
     this.foodGrid = new SpatialGrid(this.worldWidth, this.worldHeight, PERCEPTION_RADIUS);
+    this.foodAGrid = new SpatialGrid(this.worldWidth, this.worldHeight, PERCEPTION_RADIUS);
+    this.foodBGrid = new SpatialGrid(this.worldWidth, this.worldHeight, PERCEPTION_RADIUS);
     this.creatureGrid = new SpatialGrid(this.worldWidth, this.worldHeight, ATTACK_RADIUS);
     this.matingGrid = new SpatialGrid(this.worldWidth, this.worldHeight, MATE_SEEK_RADIUS);
+    this.tradeGrid = new SpatialGrid(this.worldWidth, this.worldHeight, TRADE_RADIUS);
 
     const initialCreatures = options.initialCreatures ?? 200;
     for (let i = 0; i < initialCreatures; i++) this.spawnCreature();
 
     const initialFood = options.initialFood ?? 400;
     for (let i = 0; i < initialFood; i++) this.spawnFood();
+
+    const initialNutrient = options.initialNutrient ?? 300;
+    for (let i = 0; i < initialNutrient; i++) this.spawnFoodA();
+    for (let i = 0; i < initialNutrient; i++) this.spawnFoodB();
   }
 
   step(dt: number): void {
     this.foodGrid.clear();
     for (let i = 0; i < this.foodCount; i++) {
       this.foodGrid.insert(i, this.foodPosX[i], this.foodPosY[i]);
+    }
+    this.foodAGrid.clear();
+    for (let i = 0; i < this.foodACount; i++) {
+      this.foodAGrid.insert(i, this.foodAPosX[i], this.foodAPosY[i]);
+    }
+    this.foodBGrid.clear();
+    for (let i = 0; i < this.foodBCount; i++) {
+      this.foodBGrid.insert(i, this.foodBPosX[i], this.foodBPosY[i]);
     }
 
     for (let i = this.creatureCount - 1; i >= 0; i--) {
@@ -166,15 +234,49 @@ export class World {
         }
       });
 
+      // Nutrient-seeking only kicks in when nothing pulls the creature
+      // toward energy food this tick — it fills in the former pure-wander
+      // branch with purposeful movement toward whichever nutrient (A or B)
+      // it's currently more deficient in.
+      let nutrientTarget = -1;
+      let nutrientIsA = true;
+
       if (nearestFood >= 0) {
         const dist = Math.sqrt(nearestDistSq) || 1;
         this.creatureHeadingX[i] = (this.foodPosX[nearestFood] - cx) / dist;
         this.creatureHeadingY[i] = (this.foodPosY[nearestFood] - cy) / dist;
       } else {
-        const currentAngle = Math.atan2(this.creatureHeadingY[i], this.creatureHeadingX[i]);
-        const newAngle = currentAngle + this.rng.range(-TURN_JITTER, TURN_JITTER) * dt;
-        this.creatureHeadingX[i] = Math.cos(newAngle);
-        this.creatureHeadingY[i] = Math.sin(newAngle);
+        const deficitA = NUTRIENT_TARGET_RESERVE - this.creatureReserveA[i];
+        const deficitB = NUTRIENT_TARGET_RESERVE - this.creatureReserveB[i];
+        nutrientIsA = deficitA >= deficitB;
+        const moreDeficit = nutrientIsA ? deficitA : deficitB;
+        const grid = nutrientIsA ? this.foodAGrid : this.foodBGrid;
+        const patchX = nutrientIsA ? this.foodAPosX : this.foodBPosX;
+        const patchY = nutrientIsA ? this.foodAPosY : this.foodBPosY;
+
+        let nutrientDistSq = PERCEPTION_RADIUS * PERCEPTION_RADIUS;
+        if (moreDeficit > 0) {
+          grid.forEachNear(cx, cy, PERCEPTION_RADIUS, (patchIndex) => {
+            const dx = patchX[patchIndex] - cx;
+            const dy = patchY[patchIndex] - cy;
+            const distSq = dx * dx + dy * dy;
+            if (distSq < nutrientDistSq) {
+              nutrientDistSq = distSq;
+              nutrientTarget = patchIndex;
+            }
+          });
+        }
+
+        if (nutrientTarget >= 0) {
+          const dist = Math.sqrt(nutrientDistSq) || 1;
+          this.creatureHeadingX[i] = (patchX[nutrientTarget] - cx) / dist;
+          this.creatureHeadingY[i] = (patchY[nutrientTarget] - cy) / dist;
+        } else {
+          const currentAngle = Math.atan2(this.creatureHeadingY[i], this.creatureHeadingX[i]);
+          const newAngle = currentAngle + this.rng.range(-TURN_JITTER, TURN_JITTER) * dt;
+          this.creatureHeadingX[i] = Math.cos(newAngle);
+          this.creatureHeadingY[i] = Math.sin(newAngle);
+        }
       }
 
       const speed = BASE_SPEED * this.creatureSpeedGene[i];
@@ -199,6 +301,26 @@ export class World {
           this.creatureEnergy[i] = Math.min(ENERGY_CAP, this.creatureEnergy[i] + FOOD_ENERGY);
           this.removeFood(nearestFood);
         }
+      } else if (nutrientTarget >= 0) {
+        const patchX = nutrientIsA ? this.foodAPosX : this.foodBPosX;
+        const patchY = nutrientIsA ? this.foodAPosY : this.foodBPosY;
+        const patchCount = nutrientIsA ? this.foodACount : this.foodBCount;
+        if (nutrientTarget < patchCount) {
+          const dx = patchX[nutrientTarget] - nx;
+          const dy = patchY[nutrientTarget] - ny;
+          if (dx * dx + dy * dy <= EAT_RADIUS * EAT_RADIUS) {
+            const angle = this.creatureHabAngle[i];
+            if (nutrientIsA) {
+              const hab = Math.cos(angle);
+              this.creatureReserveA[i] = Math.min(NUTRIENT_RESERVE_CAP, this.creatureReserveA[i] + hab * NUTRIENT_GAIN_MAX);
+              this.removeFoodA(nutrientTarget);
+            } else {
+              const hab = Math.sin(angle);
+              this.creatureReserveB[i] = Math.min(NUTRIENT_RESERVE_CAP, this.creatureReserveB[i] + hab * NUTRIENT_GAIN_MAX);
+              this.removeFoodB(nutrientTarget);
+            }
+          }
+        }
       }
 
       if (this.creatureEnergy[i] <= 0) {
@@ -208,8 +330,11 @@ export class World {
     }
 
     this.resolvePredation();
+    this.resolveTrading();
     this.resolveMating();
     this.spawnFoodOverTime(dt);
+    this.spawnFoodAOverTime(dt);
+    this.spawnFoodBOverTime(dt);
     this.tick++;
   }
 
@@ -255,24 +380,132 @@ export class World {
     }
   }
 
-  // Ready creatures (energy >= REPRODUCE_THRESHOLD) pair up only if each
-  // finds the other's traits within its own preference tolerance — mutual
-  // mate choice. Reproduction only appends children (never removes), so
-  // unlike predation there's no swap-pop hazard; we just snapshot the
-  // count up front so children created this tick aren't visited again.
+  // A creature with a surplus of one nutrient and a deficit of the other
+  // looks for a nearby creature with the complementary profile and swaps
+  // chunks — both only ever gain (v1: honest, atomic exchange, no
+  // defection). Among qualifying partners, preference is biased toward
+  // genetic kin via `kinTradeBias`, since kin cooperation is the easiest
+  // to evolve and gives the mechanism somewhere to bootstrap from.
+  private resolveTrading(): void {
+    const snapshot = this.creatureCount;
+    this.hasTradedThisTick.fill(0, 0, snapshot);
+
+    this.tradeGrid.clear();
+    for (let i = 0; i < snapshot; i++) {
+      const surplusA = this.creatureReserveA[i] - NUTRIENT_TARGET_RESERVE;
+      const surplusB = this.creatureReserveB[i] - NUTRIENT_TARGET_RESERVE;
+      if (surplusA > 0 || surplusB > 0) {
+        this.tradeGrid.insert(i, this.creaturePosX[i], this.creaturePosY[i]);
+      }
+    }
+
+    for (let i = 0; i < snapshot; i++) {
+      if (this.hasTradedThisTick[i]) continue;
+
+      const mySurplusA = Math.max(0, this.creatureReserveA[i] - NUTRIENT_TARGET_RESERVE);
+      const mySurplusB = Math.max(0, this.creatureReserveB[i] - NUTRIENT_TARGET_RESERVE);
+      const myDeficitA = Math.max(0, NUTRIENT_TARGET_RESERVE - this.creatureReserveA[i]);
+      const myDeficitB = Math.max(0, NUTRIENT_TARGET_RESERVE - this.creatureReserveB[i]);
+      const iOffersA = mySurplusA > 0 && myDeficitB > 0;
+      const iOffersB = mySurplusB > 0 && myDeficitA > 0;
+      if (!iOffersA && !iOffersB) continue;
+
+      const cx = this.creaturePosX[i];
+      const cy = this.creaturePosY[i];
+      const kinBias = this.creatureKinTradeBias[i];
+
+      let bestPartner = -1;
+      let bestScore = Infinity;
+      this.tradeGrid.forEachNear(cx, cy, TRADE_RADIUS, (other) => {
+        if (other === i || other >= snapshot || this.hasTradedThisTick[other]) return;
+        const otherSurplusA = Math.max(0, this.creatureReserveA[other] - NUTRIENT_TARGET_RESERVE);
+        const otherSurplusB = Math.max(0, this.creatureReserveB[other] - NUTRIENT_TARGET_RESERVE);
+        const otherDeficitA = Math.max(0, NUTRIENT_TARGET_RESERVE - this.creatureReserveA[other]);
+        const otherDeficitB = Math.max(0, NUTRIENT_TARGET_RESERVE - this.creatureReserveB[other]);
+        const complementary =
+          (iOffersA && otherSurplusB > 0 && otherDeficitA > 0) ||
+          (iOffersB && otherSurplusA > 0 && otherDeficitB > 0);
+        if (!complementary) return;
+
+        const dx = this.creaturePosX[other] - cx;
+        const dy = this.creaturePosY[other] - cy;
+        const distSq = dx * dx + dy * dy;
+        if (distSq > TRADE_RADIUS * TRADE_RADIUS) return;
+
+        const spatialScore = distSq / (TRADE_RADIUS * TRADE_RADIUS);
+        const kinScore = kinBias * (this.genomeDistance(i, other) / MAX_GENOME_DISTANCE);
+        const score = spatialScore + kinScore;
+        if (score < bestScore) {
+          bestScore = score;
+          bestPartner = other;
+        }
+      });
+
+      if (bestPartner >= 0) this.executeTrade(i, bestPartner);
+    }
+  }
+
+  private executeTrade(a: number, b: number): void {
+    const surplusAofA = Math.max(0, this.creatureReserveA[a] - NUTRIENT_TARGET_RESERVE);
+    const deficitAofB = Math.max(0, NUTRIENT_TARGET_RESERVE - this.creatureReserveA[b]);
+    const surplusBofB = Math.max(0, this.creatureReserveB[b] - NUTRIENT_TARGET_RESERVE);
+    const deficitBofA = Math.max(0, NUTRIENT_TARGET_RESERVE - this.creatureReserveB[a]);
+
+    const surplusBofA = Math.max(0, this.creatureReserveB[a] - NUTRIENT_TARGET_RESERVE);
+    const deficitBofB = Math.max(0, NUTRIENT_TARGET_RESERVE - this.creatureReserveB[b]);
+    const surplusAofB = Math.max(0, this.creatureReserveA[b] - NUTRIENT_TARGET_RESERVE);
+    const deficitAofA = Math.max(0, NUTRIENT_TARGET_RESERVE - this.creatureReserveA[a]);
+
+    // Case 1: a gives A (has surplus, b has deficit), b gives B back.
+    const aGivesA = Math.min(surplusAofA, deficitAofB, TRADE_CHUNK);
+    const bGivesB = Math.min(surplusBofB, deficitBofA, TRADE_CHUNK);
+    // Case 2 (mirror): a gives B, b gives A.
+    const aGivesB = Math.min(surplusBofA, deficitBofB, TRADE_CHUNK);
+    const bGivesA = Math.min(surplusAofB, deficitAofA, TRADE_CHUNK);
+
+    if (aGivesA > 0 && bGivesB > 0) {
+      this.creatureReserveA[a] -= aGivesA;
+      this.creatureReserveA[b] += aGivesA;
+      this.creatureReserveB[b] -= bGivesB;
+      this.creatureReserveB[a] += bGivesB;
+    } else if (aGivesB > 0 && bGivesA > 0) {
+      this.creatureReserveB[a] -= aGivesB;
+      this.creatureReserveB[b] += aGivesB;
+      this.creatureReserveA[b] -= bGivesA;
+      this.creatureReserveA[a] += bGivesA;
+    } else {
+      return;
+    }
+
+    this.hasTradedThisTick[a] = 1;
+    this.hasTradedThisTick[b] = 1;
+    this.totalTrades++;
+  }
+
+  private isReadyToMate(i: number): boolean {
+    return (
+      this.creatureEnergy[i] >= REPRODUCE_THRESHOLD &&
+      this.creatureReserveA[i] >= NUTRIENT_MIN_FOR_REPRODUCTION &&
+      this.creatureReserveB[i] >= NUTRIENT_MIN_FOR_REPRODUCTION
+    );
+  }
+
+  // Ready creatures pair up only if each finds the other's traits within
+  // its own preference tolerance — mutual mate choice. Reproduction only
+  // appends children (never removes), so unlike predation there's no
+  // swap-pop hazard; we just snapshot the count up front so children
+  // created this tick aren't visited again.
   private resolveMating(): void {
     const readyCountSnapshot = this.creatureCount;
     this.hasMatedThisTick.fill(0, 0, readyCountSnapshot);
 
     this.matingGrid.clear();
     for (let i = 0; i < readyCountSnapshot; i++) {
-      if (this.creatureEnergy[i] >= REPRODUCE_THRESHOLD) {
-        this.matingGrid.insert(i, this.creaturePosX[i], this.creaturePosY[i]);
-      }
+      if (this.isReadyToMate(i)) this.matingGrid.insert(i, this.creaturePosX[i], this.creaturePosY[i]);
     }
 
     for (let i = 0; i < readyCountSnapshot; i++) {
-      if (this.hasMatedThisTick[i] || this.creatureEnergy[i] < REPRODUCE_THRESHOLD) continue;
+      if (this.hasMatedThisTick[i] || !this.isReadyToMate(i)) continue;
 
       const cx = this.creaturePosX[i];
       const cy = this.creaturePosY[i];
@@ -347,12 +580,28 @@ export class World {
     this.creaturePrefSpeed[i] = this.rng.range(SPEED_GENE_MIN, SPEED_GENE_MAX);
     this.creaturePrefReserve[i] = this.rng.range(RESERVE_GENE_MIN, RESERVE_GENE_MAX);
     this.creatureMateTolerance[i] = this.rng.range(MATE_TOLERANCE_MIN, MATE_TOLERANCE_MAX);
+    this.creatureHabAngle[i] = this.rng.range(0, Math.PI / 2);
+    this.creatureReserveA[i] = NUTRIENT_INITIAL_RESERVE;
+    this.creatureReserveB[i] = NUTRIENT_INITIAL_RESERVE;
+    this.creatureKinTradeBias[i] = this.rng.next();
   }
 
   private spawnFood(): void {
     const i = this.foodCount++;
     this.foodPosX[i] = this.rng.next() * this.worldWidth;
     this.foodPosY[i] = this.rng.next() * this.worldHeight;
+  }
+
+  private spawnFoodA(): void {
+    const i = this.foodACount++;
+    this.foodAPosX[i] = this.rng.next() * this.worldWidth;
+    this.foodAPosY[i] = this.rng.next() * this.worldHeight;
+  }
+
+  private spawnFoodB(): void {
+    const i = this.foodBCount++;
+    this.foodBPosX[i] = this.rng.next() * this.worldWidth;
+    this.foodBPosY[i] = this.rng.next() * this.worldHeight;
   }
 
   // Square-wave climate: alternates scarcity and abundance so we can test
@@ -372,11 +621,43 @@ export class World {
     for (let s = 0; s < spawns && this.foodCount < this.foodCapacity; s++) this.spawnFood();
   }
 
+  private spawnFoodAOverTime(dt: number): void {
+    const emptySlots = this.nutrientCapacity - this.foodACount;
+    if (emptySlots <= 0) return;
+    const expected = FOOD_REGROWTH_PROBABILITY * emptySlots * dt;
+    let spawns = Math.floor(expected);
+    if (this.rng.next() < expected - spawns) spawns++;
+    for (let s = 0; s < spawns && this.foodACount < this.nutrientCapacity; s++) this.spawnFoodA();
+  }
+
+  private spawnFoodBOverTime(dt: number): void {
+    const emptySlots = this.nutrientCapacity - this.foodBCount;
+    if (emptySlots <= 0) return;
+    const expected = FOOD_REGROWTH_PROBABILITY * emptySlots * dt;
+    let spawns = Math.floor(expected);
+    if (this.rng.next() < expected - spawns) spawns++;
+    for (let s = 0; s < spawns && this.foodBCount < this.nutrientCapacity; s++) this.spawnFoodB();
+  }
+
   private removeFood(index: number): void {
     const last = this.foodCount - 1;
     this.foodPosX[index] = this.foodPosX[last];
     this.foodPosY[index] = this.foodPosY[last];
     this.foodCount--;
+  }
+
+  private removeFoodA(index: number): void {
+    const last = this.foodACount - 1;
+    this.foodAPosX[index] = this.foodAPosX[last];
+    this.foodAPosY[index] = this.foodAPosY[last];
+    this.foodACount--;
+  }
+
+  private removeFoodB(index: number): void {
+    const last = this.foodBCount - 1;
+    this.foodBPosX[index] = this.foodBPosX[last];
+    this.foodBPosY[index] = this.foodBPosY[last];
+    this.foodBCount--;
   }
 
   private removeCreature(index: number): void {
@@ -392,6 +673,10 @@ export class World {
     this.creaturePrefSpeed[index] = this.creaturePrefSpeed[last];
     this.creaturePrefReserve[index] = this.creaturePrefReserve[last];
     this.creatureMateTolerance[index] = this.creatureMateTolerance[last];
+    this.creatureHabAngle[index] = this.creatureHabAngle[last];
+    this.creatureReserveA[index] = this.creatureReserveA[last];
+    this.creatureReserveB[index] = this.creatureReserveB[last];
+    this.creatureKinTradeBias[index] = this.creatureKinTradeBias[last];
     const indexBase = index * MARKER_GENE_COUNT;
     const lastBase = last * MARKER_GENE_COUNT;
     for (let g = 0; g < MARKER_GENE_COUNT; g++) {
@@ -406,6 +691,10 @@ export class World {
     const childIndex = this.creatureCount++;
     this.creatureEnergy[parentA] -= SEXUAL_REPRODUCE_COST_PER_PARENT;
     this.creatureEnergy[parentB] -= SEXUAL_REPRODUCE_COST_PER_PARENT;
+    this.creatureReserveA[parentA] -= NUTRIENT_REPRODUCE_COST;
+    this.creatureReserveB[parentA] -= NUTRIENT_REPRODUCE_COST;
+    this.creatureReserveA[parentB] -= NUTRIENT_REPRODUCE_COST;
+    this.creatureReserveB[parentB] -= NUTRIENT_REPRODUCE_COST;
 
     this.creaturePosX[childIndex] = this.creaturePosX[parentA];
     this.creaturePosY[childIndex] = this.creaturePosY[parentA];
@@ -413,6 +702,8 @@ export class World {
     this.creatureHeadingX[childIndex] = Math.cos(angle);
     this.creatureHeadingY[childIndex] = Math.sin(angle);
     this.creatureEnergy[childIndex] = CHILD_INITIAL_ENERGY;
+    this.creatureReserveA[childIndex] = NUTRIENT_CHILD_INITIAL_RESERVE;
+    this.creatureReserveB[childIndex] = NUTRIENT_CHILD_INITIAL_RESERVE;
 
     this.creatureSpeedGene[childIndex] = this.recombine(
       this.rng,
@@ -462,6 +753,22 @@ export class World {
       0,
       MAX_GENOME_DISTANCE,
     );
+    this.creatureHabAngle[childIndex] = this.recombine(
+      this.rng,
+      this.creatureHabAngle[parentA],
+      this.creatureHabAngle[parentB],
+      HAB_ANGLE_MUTATION_STD_DEV,
+      0,
+      Math.PI / 2,
+    );
+    this.creatureKinTradeBias[childIndex] = this.recombine(
+      this.rng,
+      this.creatureKinTradeBias[parentA],
+      this.creatureKinTradeBias[parentB],
+      KIN_TRADE_BIAS_MUTATION_STD_DEV,
+      0,
+      1,
+    );
 
     const baseA = parentA * MARKER_GENE_COUNT;
     const baseB = parentB * MARKER_GENE_COUNT;
@@ -500,6 +807,19 @@ export class World {
     return this.meanOf(this.creaturePrefReserve);
   }
 
+  meanKinTradeBias(): number {
+    return this.meanOf(this.creatureKinTradeBias);
+  }
+
+  // 0 (angle == pi/4, a pure generalist) to 1 (angle == 0 or pi/2, a pure
+  // A- or B-specialist).
+  meanSpecialization(): number {
+    if (this.creatureCount === 0) return 0;
+    let sum = 0;
+    for (let i = 0; i < this.creatureCount; i++) sum += Math.abs(Math.cos(2 * this.creatureHabAngle[i]));
+    return sum / this.creatureCount;
+  }
+
   private meanOf(values: Float32Array): number {
     if (this.creatureCount === 0) return 0;
     let sum = 0;
@@ -509,7 +829,7 @@ export class World {
 
   toSnapshot(): WorldSnapshot {
     return {
-      version: 3,
+      version: 4,
       tick: this.tick,
       worldWidth: this.worldWidth,
       worldHeight: this.worldHeight,
@@ -529,17 +849,28 @@ export class World {
       creaturePrefSpeed: Array.from(this.creaturePrefSpeed.subarray(0, this.creatureCount)),
       creaturePrefReserve: Array.from(this.creaturePrefReserve.subarray(0, this.creatureCount)),
       creatureMateTolerance: Array.from(this.creatureMateTolerance.subarray(0, this.creatureCount)),
+      creatureHabAngle: Array.from(this.creatureHabAngle.subarray(0, this.creatureCount)),
+      creatureReserveA: Array.from(this.creatureReserveA.subarray(0, this.creatureCount)),
+      creatureReserveB: Array.from(this.creatureReserveB.subarray(0, this.creatureCount)),
+      creatureKinTradeBias: Array.from(this.creatureKinTradeBias.subarray(0, this.creatureCount)),
       totalPredations: this.totalPredations,
       totalMatings: this.totalMatings,
+      totalTrades: this.totalTrades,
       foodCount: this.foodCount,
       foodPosX: Array.from(this.foodPosX.subarray(0, this.foodCount)),
       foodPosY: Array.from(this.foodPosY.subarray(0, this.foodCount)),
+      foodACount: this.foodACount,
+      foodAPosX: Array.from(this.foodAPosX.subarray(0, this.foodACount)),
+      foodAPosY: Array.from(this.foodAPosY.subarray(0, this.foodACount)),
+      foodBCount: this.foodBCount,
+      foodBPosX: Array.from(this.foodBPosX.subarray(0, this.foodBCount)),
+      foodBPosY: Array.from(this.foodBPosY.subarray(0, this.foodBCount)),
     };
   }
 
   loadSnapshot(snapshot: WorldSnapshot): void {
-    if (snapshot.version !== 3) {
-      throw new Error(`Versión de guardado incompatible: se esperaba 3, el archivo tiene ${snapshot.version}`);
+    if (snapshot.version !== 4) {
+      throw new Error(`Versión de guardado incompatible: se esperaba 4, el archivo tiene ${snapshot.version}`);
     }
     if (snapshot.creatureCount > this.creatureCapacity) {
       throw new Error(
@@ -548,6 +879,9 @@ export class World {
     }
     if (snapshot.foodCount > this.foodCapacity) {
       throw new Error(`Snapshot has ${snapshot.foodCount} food items, capacity is ${this.foodCapacity}`);
+    }
+    if (snapshot.foodACount > this.nutrientCapacity || snapshot.foodBCount > this.nutrientCapacity) {
+      throw new Error(`Snapshot nutrient counts exceed capacity ${this.nutrientCapacity}`);
     }
 
     this.tick = snapshot.tick;
@@ -566,11 +900,22 @@ export class World {
     this.creaturePrefSpeed.set(snapshot.creaturePrefSpeed);
     this.creaturePrefReserve.set(snapshot.creaturePrefReserve);
     this.creatureMateTolerance.set(snapshot.creatureMateTolerance);
+    this.creatureHabAngle.set(snapshot.creatureHabAngle);
+    this.creatureReserveA.set(snapshot.creatureReserveA);
+    this.creatureReserveB.set(snapshot.creatureReserveB);
+    this.creatureKinTradeBias.set(snapshot.creatureKinTradeBias);
     this.totalPredations = snapshot.totalPredations;
     this.totalMatings = snapshot.totalMatings;
+    this.totalTrades = snapshot.totalTrades;
 
     this.foodCount = snapshot.foodCount;
     this.foodPosX.set(snapshot.foodPosX);
     this.foodPosY.set(snapshot.foodPosY);
+    this.foodACount = snapshot.foodACount;
+    this.foodAPosX.set(snapshot.foodAPosX);
+    this.foodAPosY.set(snapshot.foodAPosY);
+    this.foodBCount = snapshot.foodBCount;
+    this.foodBPosX.set(snapshot.foodBPosX);
+    this.foodBPosY.set(snapshot.foodBPosY);
   }
 }

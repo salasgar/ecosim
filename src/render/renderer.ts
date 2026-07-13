@@ -17,17 +17,35 @@ export class Renderer {
   private readonly app: Application;
   private readonly creatureContainer: Container;
   private readonly foodContainer: Container;
+  private readonly nutrientAContainer: Container;
+  private readonly nutrientBContainer: Container;
   private readonly creatureTexture: Texture;
   private readonly foodTexture: Texture;
+  private readonly nutrientATexture: Texture;
+  private readonly nutrientBTexture: Texture;
   private readonly creatureSprites: Sprite[] = [];
   private readonly foodSprites: Sprite[] = [];
+  private readonly nutrientASprites: Sprite[] = [];
+  private readonly nutrientBSprites: Sprite[] = [];
 
-  private constructor(app: Application, creatureTexture: Texture, foodTexture: Texture) {
+  private constructor(
+    app: Application,
+    creatureTexture: Texture,
+    foodTexture: Texture,
+    nutrientATexture: Texture,
+    nutrientBTexture: Texture,
+  ) {
     this.app = app;
     this.creatureTexture = creatureTexture;
     this.foodTexture = foodTexture;
+    this.nutrientATexture = nutrientATexture;
+    this.nutrientBTexture = nutrientBTexture;
+    this.nutrientAContainer = new Container();
+    this.nutrientBContainer = new Container();
     this.foodContainer = new Container();
     this.creatureContainer = new Container();
+    this.app.stage.addChild(this.nutrientAContainer);
+    this.app.stage.addChild(this.nutrientBContainer);
     this.app.stage.addChild(this.foodContainer);
     this.app.stage.addChild(this.creatureContainer);
   }
@@ -45,7 +63,15 @@ export class Renderer {
     const foodTexture = app.renderer.generateTexture(foodGraphics);
     foodGraphics.destroy();
 
-    return new Renderer(app, creatureTexture, foodTexture);
+    const nutrientAGraphics = new Graphics().circle(0, 0, 2.5).fill(0x38bdf8);
+    const nutrientATexture = app.renderer.generateTexture(nutrientAGraphics);
+    nutrientAGraphics.destroy();
+
+    const nutrientBGraphics = new Graphics().circle(0, 0, 2.5).fill(0xf472b6);
+    const nutrientBTexture = app.renderer.generateTexture(nutrientBGraphics);
+    nutrientBGraphics.destroy();
+
+    return new Renderer(app, creatureTexture, foodTexture, nutrientATexture, nutrientBTexture);
   }
 
   get width(): number {
@@ -62,6 +88,20 @@ export class Renderer {
       const sprite = this.foodSprites[i];
       sprite.x = message.foodPosX[i];
       sprite.y = message.foodPosY[i];
+    }
+
+    this.syncPool(this.nutrientASprites, this.nutrientAContainer, this.nutrientATexture, message.foodACount);
+    for (let i = 0; i < message.foodACount; i++) {
+      const sprite = this.nutrientASprites[i];
+      sprite.x = message.foodAPosX[i];
+      sprite.y = message.foodAPosY[i];
+    }
+
+    this.syncPool(this.nutrientBSprites, this.nutrientBContainer, this.nutrientBTexture, message.foodBCount);
+    for (let i = 0; i < message.foodBCount; i++) {
+      const sprite = this.nutrientBSprites[i];
+      sprite.x = message.foodBPosX[i];
+      sprite.y = message.foodBPosY[i];
     }
 
     this.syncPool(this.creatureSprites, this.creatureContainer, this.creatureTexture, message.creatureCount);

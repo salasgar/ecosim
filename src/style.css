@@ -67,3 +67,8 @@ body {
   right: 12px;
 }
 
+.chart-panel.chart-panel-center {
+  left: 50%;
+  transform: translateX(-50%);
+}
+

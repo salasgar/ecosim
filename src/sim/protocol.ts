@@ -54,6 +54,12 @@ export interface TickMessage {
   foodCount: number;
   foodPosX: Float32Array;
   foodPosY: Float32Array;
+  foodACount: number;
+  foodAPosX: Float32Array;
+  foodAPosY: Float32Array;
+  foodBCount: number;
+  foodBPosX: Float32Array;
+  foodBPosY: Float32Array;
 }
 
 // Cheap, array-free summary sent every tick regardless of render mode —
@@ -68,15 +74,18 @@ export interface StatsMessage {
   meanReserveGene: number;
   meanPrefSpeed: number;
   meanPrefReserve: number;
+  meanSpecialization: number;
+  meanKinTradeBias: number;
   totalPredations: number;
   totalMatings: number;
+  totalTrades: number;
   climateMultiplier: number;
 }
 
 // A full, JSON-serializable copy of world state, precise enough (including
 // the RNG's internal state) to resume a run bit-for-bit identically.
 export interface WorldSnapshot {
-  version: 3;
+  version: 4;
   tick: number;
   worldWidth: number;
   worldHeight: number;
@@ -94,11 +103,22 @@ export interface WorldSnapshot {
   creaturePrefSpeed: number[];
   creaturePrefReserve: number[];
   creatureMateTolerance: number[];
+  creatureHabAngle: number[];
+  creatureReserveA: number[];
+  creatureReserveB: number[];
+  creatureKinTradeBias: number[];
   totalPredations: number;
   totalMatings: number;
+  totalTrades: number;
   foodCount: number;
   foodPosX: number[];
   foodPosY: number[];
+  foodACount: number;
+  foodAPosX: number[];
+  foodAPosY: number[];
+  foodBCount: number;
+  foodBPosX: number[];
+  foodBPosY: number[];
 }
 
 export interface SaveMessage {

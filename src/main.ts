@@ -3,6 +3,7 @@ import "uplot/dist/uPlot.min.css";
 import { Renderer } from "./render/renderer";
 import { PopulationChart } from "./render/populationChart";
 import { TraitChart } from "./render/traitChart";
+import { TradeChart } from "./render/tradeChart";
 import type { FromWorkerMessage, ToWorkerMessage, WorldSnapshot } from "./sim/protocol";
 
 const MAX_SPEED_TICKS_PER_FRAME = 20;
@@ -68,6 +69,11 @@ async function bootstrap(): Promise<void> {
   appHost.appendChild(traitChartHost);
   const traitChart = new TraitChart(traitChartHost);
 
+  const tradeChartHost = document.createElement("div");
+  tradeChartHost.className = "chart-panel chart-panel-center";
+  appHost.appendChild(tradeChartHost);
+  const tradeChart = new TradeChart(tradeChartHost);
+
   const worker = new Worker(new URL("./sim/worker.ts", import.meta.url), { type: "module" });
 
   let paused = false;
@@ -121,9 +127,10 @@ async function bootstrap(): Promise<void> {
         break;
       case "stats": {
         const climate = message.climateMultiplier < 1 ? "escasez" : "abundancia";
-        stats.textContent = `tick ${message.tick} · criaturas ${message.creatureCount} · comida ${message.foodCount} · vel. media ${message.meanSpeedGene.toFixed(2)} · umbral parentesco ${message.meanKinTolerance.toFixed(2)} · depredaciones ${message.totalPredations} · uniones ${message.totalMatings} · clima ${climate}`;
+        stats.textContent = `tick ${message.tick} · criaturas ${message.creatureCount} · comida ${message.foodCount} · vel. media ${message.meanSpeedGene.toFixed(2)} · umbral parentesco ${message.meanKinTolerance.toFixed(2)} · especialización ${message.meanSpecialization.toFixed(2)} · depredaciones ${message.totalPredations} · uniones ${message.totalMatings} · comercios ${message.totalTrades} · clima ${climate}`;
         chart.push(message);
         traitChart.push(message);
+        tradeChart.push(message);
         break;
       }
       case "save":

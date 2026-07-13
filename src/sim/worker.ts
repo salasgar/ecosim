@@ -30,6 +30,10 @@ function postTick(w: World): void {
   const creatureEnergy = w.creatureEnergy.slice(0, w.creatureCount);
   const foodPosX = w.foodPosX.slice(0, w.foodCount);
   const foodPosY = w.foodPosY.slice(0, w.foodCount);
+  const foodAPosX = w.foodAPosX.slice(0, w.foodACount);
+  const foodAPosY = w.foodAPosY.slice(0, w.foodACount);
+  const foodBPosX = w.foodBPosX.slice(0, w.foodBCount);
+  const foodBPosY = w.foodBPosY.slice(0, w.foodBCount);
 
   const message: TickMessage = {
     type: "tick",
@@ -41,6 +45,12 @@ function postTick(w: World): void {
     foodCount: w.foodCount,
     foodPosX,
     foodPosY,
+    foodACount: w.foodACount,
+    foodAPosX,
+    foodAPosY,
+    foodBCount: w.foodBCount,
+    foodBPosX,
+    foodBPosY,
   };
 
   ctx.postMessage(message, [
@@ -49,6 +59,10 @@ function postTick(w: World): void {
     creatureEnergy.buffer,
     foodPosX.buffer,
     foodPosY.buffer,
+    foodAPosX.buffer,
+    foodAPosY.buffer,
+    foodBPosX.buffer,
+    foodBPosY.buffer,
   ]);
 }
 
@@ -63,8 +77,11 @@ function postStats(w: World): void {
     meanReserveGene: w.meanReserveGene(),
     meanPrefSpeed: w.meanPrefSpeed(),
     meanPrefReserve: w.meanPrefReserve(),
+    meanSpecialization: w.meanSpecialization(),
+    meanKinTradeBias: w.meanKinTradeBias(),
     totalPredations: w.totalPredations,
     totalMatings: w.totalMatings,
+    totalTrades: w.totalTrades,
     climateMultiplier: w.climateMultiplier(),
   };
   ctx.postMessage(message);
@@ -110,6 +127,7 @@ ctx.onmessage = (event) => {
           worldHeight: msg.snapshot.worldHeight,
           initialCreatures: 0,
           initialFood: 0,
+          initialNutrient: 0,
         });
         candidate.loadSnapshot(msg.snapshot);
         world = candidate;
