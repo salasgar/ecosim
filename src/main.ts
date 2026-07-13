@@ -54,6 +54,10 @@ async function bootstrap(): Promise<void> {
   paramsButton.textContent = "Parámetros";
   hud.appendChild(paramsButton);
 
+  const worldVisibilityButton = document.createElement("button");
+  worldVisibilityButton.textContent = "Ocultar mundo";
+  hud.appendChild(worldVisibilityButton);
+
   const loadInput = document.createElement("input");
   loadInput.type = "file";
   loadInput.accept = "application/json";
@@ -165,6 +169,13 @@ async function bootstrap(): Promise<void> {
 
   paramsButton.addEventListener("click", () => {
     paramsPanel.classList.toggle("hidden");
+  });
+
+  let worldVisible = true;
+  worldVisibilityButton.addEventListener("click", () => {
+    worldVisible = !worldVisible;
+    renderer.setWorldVisible(worldVisible);
+    worldVisibilityButton.textContent = worldVisible ? "Ocultar mundo" : "Mostrar mundo";
   });
 
   let paused = false;

@@ -82,6 +82,10 @@ export class Renderer {
     return this.app.renderer.height;
   }
 
+  setWorldVisible(visible: boolean): void {
+    this.app.stage.visible = visible;
+  }
+
   update(message: TickMessage): void {
     this.syncPool(this.foodSprites, this.foodContainer, this.foodTexture, message.foodCount);
     for (let i = 0; i < message.foodCount; i++) {
