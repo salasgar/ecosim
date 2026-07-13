@@ -60,7 +60,12 @@ function postStats(w: World): void {
     foodCount: w.foodCount,
     meanSpeedGene: w.meanSpeedGene(),
     meanKinTolerance: w.meanKinTolerance(),
+    meanReserveGene: w.meanReserveGene(),
+    meanPrefSpeed: w.meanPrefSpeed(),
+    meanPrefReserve: w.meanPrefReserve(),
     totalPredations: w.totalPredations,
+    totalMatings: w.totalMatings,
+    climateMultiplier: w.climateMultiplier(),
   };
   ctx.postMessage(message);
 }

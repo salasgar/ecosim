@@ -62,3 +62,8 @@ body {
   backdrop-filter: blur(4px);
 }
 
+.chart-panel.chart-panel-right {
+  left: auto;
+  right: 12px;
+}
+

@@ -65,13 +65,18 @@ export interface StatsMessage {
   foodCount: number;
   meanSpeedGene: number;
   meanKinTolerance: number;
+  meanReserveGene: number;
+  meanPrefSpeed: number;
+  meanPrefReserve: number;
   totalPredations: number;
+  totalMatings: number;
+  climateMultiplier: number;
 }
 
 // A full, JSON-serializable copy of world state, precise enough (including
 // the RNG's internal state) to resume a run bit-for-bit identically.
 export interface WorldSnapshot {
-  version: 2;
+  version: 3;
   tick: number;
   worldWidth: number;
   worldHeight: number;
@@ -85,7 +90,12 @@ export interface WorldSnapshot {
   creatureEnergy: number[];
   creatureGenomeMarkers: number[];
   creatureKinTolerance: number[];
+  creatureReserveGene: number[];
+  creaturePrefSpeed: number[];
+  creaturePrefReserve: number[];
+  creatureMateTolerance: number[];
   totalPredations: number;
+  totalMatings: number;
   foodCount: number;
   foodPosX: number[];
   foodPosY: number[];
