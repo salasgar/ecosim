@@ -28,6 +28,7 @@ export class ConfigurableChart {
   private series: ChartSeriesConfig[] = [];
   private lastWidth = 360;
   private lastHeight = FALLBACK_HEIGHT;
+  private legendObserver: ResizeObserver | null = null;
 
   constructor(host: HTMLElement) {
     this.host = host;
@@ -72,6 +73,8 @@ export class ConfigurableChart {
   }
 
   destroy(): void {
+    this.legendObserver?.disconnect();
+    this.legendObserver = null;
     this.plot?.destroy();
     this.plot = null;
   }
@@ -85,6 +88,8 @@ export class ConfigurableChart {
   }
 
   private rebuildPlot(): void {
+    this.legendObserver?.disconnect();
+    this.legendObserver = null;
     this.plot?.destroy();
     this.plot = null;
     this.host.replaceChildren();
@@ -122,8 +127,17 @@ export class ConfigurableChart {
       [[], ...this.series.map(() => [])] as unknown as uPlot.AlignedData,
       this.host,
     );
-    // The legend now exists in the DOM, so this corrects the guessed
-    // construction height to leave exactly enough room for it.
+    // The legend's height right after construction is a transient layout
+    // value (it can measure several times its settled size), so a one-off
+    // synchronous measurement here is unreliable. Observing the legend
+    // itself re-fits the canvas whenever the legend's real height settles
+    // or later changes (e.g. rows wrapping differently). No feedback loop:
+    // applySize only changes the canvas height, never the legend's width.
+    const legendEl = this.host.querySelector<HTMLElement>(".u-legend");
+    if (legendEl) {
+      this.legendObserver = new ResizeObserver(() => this.applySize());
+      this.legendObserver.observe(legendEl);
+    }
     this.applySize();
   }
 }
