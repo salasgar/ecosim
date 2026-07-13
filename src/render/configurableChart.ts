@@ -7,7 +7,7 @@ import { SERIES_CATALOG, seriesColor, seriesLabel, type PlottableKey } from "./s
 // so a freshly configured chart can be backfilled at full available
 // resolution instead of starting blank at the current tick.
 export const MAX_POINTS = 8000;
-const CHART_HEIGHT = 140;
+const FALLBACK_HEIGHT = 140;
 
 export type AxisSide = "left" | "right";
 
@@ -26,6 +26,8 @@ export class ConfigurableChart {
   private plot: uPlot | null = null;
   private buffer = new DecimatingSeriesBuffer(MAX_POINTS, 1);
   private series: ChartSeriesConfig[] = [];
+  private lastWidth = 360;
+  private lastHeight = FALLBACK_HEIGHT;
 
   constructor(host: HTMLElement) {
     this.host = host;
@@ -56,18 +58,30 @@ export class ConfigurableChart {
     this.plot.setData(this.buffer.data() as unknown as uPlot.AlignedData);
   }
 
-  // Height stays fixed (the card's height is driven by its content — the
-  // canvas plus uPlot's own legend, which can wrap to more than one line
-  // depending on how many series are selected) — only width tracks the
-  // host's flex-layout size.
-  resize(width: number): void {
-    if (width <= 0) return;
-    this.plot?.setSize({ width, height: CHART_HEIGHT });
+  // The card's row height is fixed by the 3x3 grid layout, and must hold
+  // both the canvas and uPlot's own legend below it — so the canvas gets
+  // whatever's left after the legend's *actual* rendered height, measured
+  // fresh each time, rather than a guessed constant. That keeps charts
+  // with more series (taller, possibly wrapped legend) from overflowing
+  // their card the way a fixed canvas height did.
+  resize(width: number, height: number): void {
+    if (width <= 0 || height <= 0) return;
+    this.lastWidth = width;
+    this.lastHeight = height;
+    this.applySize();
   }
 
   destroy(): void {
     this.plot?.destroy();
     this.plot = null;
+  }
+
+  private applySize(): void {
+    if (!this.plot) return;
+    const legendEl = this.host.querySelector<HTMLElement>(".u-legend");
+    const legendHeight = legendEl?.offsetHeight ?? 0;
+    const canvasHeight = Math.max(40, this.lastHeight - legendHeight);
+    this.plot.setSize({ width: this.lastWidth, height: canvasHeight });
   }
 
   private rebuildPlot(): void {
@@ -92,12 +106,13 @@ export class ConfigurableChart {
     if (usesLeft) axesOpts.push({ scale: "left", stroke: "#9ca3af", grid: { stroke: "#2e303a" }, side: 3 });
     if (usesRight) axesOpts.push({ scale: "right", stroke: "#9ca3af", grid: { show: false }, side: 1 });
 
-    const width = this.host.clientWidth || 360;
+    this.lastWidth = this.host.clientWidth || this.lastWidth;
+    this.lastHeight = this.host.clientHeight || this.lastHeight;
 
     this.plot = new uPlot(
       {
-        width,
-        height: CHART_HEIGHT,
+        width: this.lastWidth,
+        height: this.lastHeight,
         padding: [8, 8, 0, 0],
         scales,
         series: seriesOpts,
@@ -107,5 +122,8 @@ export class ConfigurableChart {
       [[], ...this.series.map(() => [])] as unknown as uPlot.AlignedData,
       this.host,
     );
+    // The legend now exists in the DOM, so this corrects the guessed
+    // construction height to leave exactly enough room for it.
+    this.applySize();
   }
 }

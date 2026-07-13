@@ -112,7 +112,7 @@ export function createChartsManager(appHost: HTMLElement): ChartsManager {
 
     const resizeObserver = new ResizeObserver((observedEntries) => {
       for (const observed of observedEntries) {
-        instance.resize(observed.contentRect.width);
+        instance.resize(observed.contentRect.width, observed.contentRect.height);
       }
     });
     resizeObserver.observe(plotHost);
