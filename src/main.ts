@@ -1,9 +1,7 @@
 import "./style.css";
 import "uplot/dist/uPlot.min.css";
 import { Renderer } from "./render/renderer";
-import { PopulationChart } from "./render/populationChart";
-import { TraitChart } from "./render/traitChart";
-import { TradeChart } from "./render/tradeChart";
+import { createChartsManager } from "./render/chartsManager";
 import type { FromWorkerMessage, ToWorkerMessage, WorldSnapshot } from "./sim/protocol";
 import { DEFAULT_PARAMS, PARAM_DESCRIPTORS, type SimParams } from "./sim/params";
 
@@ -58,6 +56,10 @@ async function bootstrap(): Promise<void> {
   worldVisibilityButton.textContent = "Ocultar mundo";
   hud.appendChild(worldVisibilityButton);
 
+  const chartsButton = document.createElement("button");
+  chartsButton.textContent = "Gráficas";
+  hud.appendChild(chartsButton);
+
   const loadInput = document.createElement("input");
   loadInput.type = "file";
   loadInput.accept = "application/json";
@@ -73,20 +75,8 @@ async function bootstrap(): Promise<void> {
   stats.textContent = "iniciando…";
   hud.appendChild(stats);
 
-  const chartHost = document.createElement("div");
-  chartHost.className = "chart-panel";
-  appHost.appendChild(chartHost);
-  const chart = new PopulationChart(chartHost);
-
-  const traitChartHost = document.createElement("div");
-  traitChartHost.className = "chart-panel chart-panel-right";
-  appHost.appendChild(traitChartHost);
-  const traitChart = new TraitChart(traitChartHost);
-
-  const tradeChartHost = document.createElement("div");
-  tradeChartHost.className = "chart-panel chart-panel-center";
-  appHost.appendChild(tradeChartHost);
-  const tradeChart = new TradeChart(tradeChartHost);
+  const chartsManager = createChartsManager(appHost);
+  chartsButton.addEventListener("click", () => chartsManager.togglePanel());
 
   const worker = new Worker(new URL("./sim/worker.ts", import.meta.url), { type: "module" });
 
@@ -230,9 +220,7 @@ async function bootstrap(): Promise<void> {
       case "stats": {
         const climate = message.climateMultiplier < 1 ? "escasez" : "abundancia";
         stats.textContent = `tick ${message.tick} · criaturas ${message.creatureCount} · comida ${message.foodCount} · vel. media ${message.meanSpeedGene.toFixed(2)} · umbral parentesco ${message.meanKinTolerance.toFixed(2)} · especialización ${message.meanSpecialization.toFixed(2)} · depredaciones ${message.totalPredations} · uniones ${message.totalMatings} · comercios ${message.totalTrades} · clima ${climate}`;
-        chart.push(message);
-        traitChart.push(message);
-        tradeChart.push(message);
+        chartsManager.push(message);
         break;
       }
       case "save":

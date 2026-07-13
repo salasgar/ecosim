@@ -50,26 +50,43 @@ body {
   font-weight: bold;
 }
 
-.chart-panel {
+.charts-area {
   position: absolute;
-  bottom: 12px;
   left: 12px;
+  right: 12px;
+  bottom: 12px;
   z-index: 1;
-  padding: 8px;
-  background: rgba(10, 14, 20, 0.7);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  align-content: flex-end;
+  gap: 8px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.chart-card {
+  flex: 1 1 360px;
+  max-width: 480px;
+  background: rgba(10, 14, 20, 0.75);
   border: 1px solid #2e303a;
   border-radius: 6px;
+  padding: 6px 8px;
   backdrop-filter: blur(4px);
 }
 
-.chart-panel.chart-panel-right {
-  left: auto;
-  right: 12px;
+.chart-card.hidden {
+  display: none;
 }
 
-.chart-panel.chart-panel-center {
-  left: 50%;
-  transform: translateX(-50%);
+.chart-card-header {
+  font-size: 12px;
+  color: #9ca3af;
+  margin-bottom: 4px;
+}
+
+.chart-card-plot {
+  width: 100%;
 }
 
 .params-panel {
@@ -147,5 +164,79 @@ body {
   min-width: 3.5em;
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.charts-manager-panel {
+  left: 12px;
+  right: auto;
+  top: 60px;
+}
+
+.chart-manager-item {
+  padding-bottom: 8px;
+}
+
+.chart-manager-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.chart-manager-controls label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.params-panel button.chart-delete-button {
+  width: auto;
+  margin-bottom: 0;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.chart-title-input {
+  background: transparent;
+  border: none;
+  border-bottom: 1px dashed #2e303a;
+  color: #c084fc;
+  font: inherit;
+  font-size: 12px;
+  width: 170px;
+  padding: 2px 0;
+}
+
+.chart-title-input:focus {
+  outline: none;
+  border-bottom-color: #c084fc;
+}
+
+.chart-series-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin: 4px 0;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.chart-series-row label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+}
+
+.chart-axis-select {
+  background: #1f2028;
+  color: inherit;
+  border: 1px solid #2e303a;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 12px;
 }
 
